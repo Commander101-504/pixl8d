@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Pixl8d</title>
+    </head>
+    <body>
+
+        <canvas id="canvas"></canvas>
+        <input type="color" id="colorPicker">
+
+        <label for="sizes">Choose a canvas size:</label>
+        <select name="sizes" id="sizes">
+            <option value="4">4x4</option>
+            <option value="8">8x8</option>
+            <option value="16" selected>16x16</option>
+            <option value="32">32x32</option>
+            <option value="64">64x64</option>
+        </select>
+
+        <script>
+            const canvas = document.querySelector("#canvas");
+            const ctx = canvas.getContext("2d");
+            const colorPicker = document.querySelector("#colorPicker");
+
+            let isDrawing = false;
+            let currentColor = "#000000";
+            let isGridOn = true;
+            let currentTool = "brush";
+
+            canvas.width = 600;
+            canvas.height = 600;
+
+            let GRID_SIZE = 16;
+            let CELL_SIZE = canvas.width / GRID_SIZE;
+
+            let grid = [];
+            
+            function createGrid() {
+                grid = [];
+                for (let row = 0; row < GRID_SIZE; row++) {
+                    grid[row] = [];
+                    for (let col = 0; col < GRID_SIZE; col++) {
+                        grid[row][col] = "#ffffff";
+                    }
+                }
+            }
+            
+            createGrid();
+            
+            function drawGrid() {
+                for (let row = 0; row < GRID_SIZE; row++) {
+                    for (let col = 0; col < GRID_SIZE; col++) {
+                        ctx.fillStyle = grid[row][col];
+                        ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            
+                        ctx.strokeStyle = isGridOn ? "#cccccc" : "transparent";
+                        ctx.strokeRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+            
+            function handleDrawing(event) {
+                if (!isDrawing) return;
+            
+                let x = event.offsetX;
+                let y = event.offsetY;
+            
+                let pixelX = Math.floor((x / canvas.width) * GRID_SIZE);
+                let pixelY = Math.floor((y / canvas.height) * GRID_SIZE);
+            
+                if (currentTool === "fill") {
+                    floodFill(pixelY, pixelX, grid[pixelY][pixelX]);
+                } else if (currentTool === "eyedropper") {
+                    currentColor = grid[pixelY][pixelX]
+                    document.querySelector("#colorPicker").value = currentColor;
+                } else {
+                    grid[pixelY][pixelX] = currentTool === "eraser" ? "#ffffff" : currentColor;
+                }
+            
+                drawGrid();
+            }
+            
+            canvas.addEventListener("mousedown", function(e) {
+                isDrawing = true;
+                handleDrawing(e);
+            });
+            
+            canvas.addEventListener("mousemove", handleDrawing);
+            
+            document.addEventListener("mouseup", function() {
+                isDrawing = false;
+            });
+            drawGrid();
+            
+            colorPicker.addEventListener("input", function(e) {
+                currentColor = e.target.value;
+            });
+            
+            document.addEventListener("keydown", function(e) {
+                if (e.key === "e") setTool("eraser");
+                if (e.key === "f") setTool("fill");
+                if (e.key === "b") setTool("brush");
+                if (e.key === "i") setTool("eyedropper");
+                if (e.ctrlKey && e.key === "Backspace") {
+                    for (let i = 0; i < GRID_SIZE; i++) {
+                        for (let k = 0; k < GRID_SIZE; k++) {
+                            grid[i][k] = "#ffffff";
+                        }
+                    }
+                    drawGrid();
+                }
+                if (e.ctrlKey && e.key === "s") {
+                    e.preventDefault();
+                    let newLink = document.createElement("a");
+                    newLink.href = canvas.toDataURL();
+                    newLink.download = "pixel-art.png";
+                    newLink.click();
+                }
+                if (e.ctrlKey && e.key === "h") {
+                    e.preventDefault();
+                    isGridOn = !isGridOn;
+                    drawGrid();
+                }
+            });
+            
+            function floodFill(row, col, targetColor) {
+                if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return;
+                if (grid[row][col] !== targetColor) return;
+                if (targetColor === currentColor) return;
+                grid[row][col] = currentColor;
+                floodFill(row - 1, col, targetColor);
+                floodFill(row + 1, col, targetColor);
+                floodFill(row, col - 1, targetColor);
+                floodFill(row, col + 1, targetColor);
+            }
+            
+            document.querySelector("#sizes").addEventListener("change", function(e) {
+            
+                GRID_SIZE = parseInt(e.target.value);
+                CELL_SIZE = canvas.width / GRID_SIZE;
+            
+                createGrid();
+                drawGrid();
+            
+            });
+
+            function setTool(tool) {
+                currentTool = tool;
+            }
+        </script>
+    </body>
+</html>

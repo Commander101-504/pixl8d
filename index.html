@@ -12,11 +12,12 @@
             }
             #palette {
                 height: 600px;
-                width: 50px;
+                width: 160px;
                 display: flex;
                 flex-direction: column;
-                align-items: center;
-                justify-content: space-evenly;
+                flex-wrap: wrap;
+                align-content: space-evenly;
+                gap: 2px;
             }
         </style>
     </head>
@@ -25,7 +26,8 @@
             <canvas id="canvas"></canvas>
             <div id="palette"></div>
         </div>
-        <input type="color" id="colorPicker">
+        <!-- color picker is hidden, only used as a programmatic trigger -->
+        <input type="color" id="colorPicker" style="display:none;">
         <input type="file" id="JSONImport" accept=".json" style="display:none;">
         <input type="file" id="paletteImport" accept=".hex" style="display:none;">
 
@@ -53,7 +55,6 @@
             let isSymmetricalY = false;
             document.title = "Pixl8d - Brush";
             
-            // zoom and pan variables
             let zoomLevel = 1;
             let panX = 0;
             let panY = 0;
@@ -70,8 +71,20 @@
                 "#000000", "#ffffff", "#ff0000", "#00ff00",
                 "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
                 "#ff8800", "#8800ff", "#00ff88", "#ff0088",
+                "#888888", "#444444", "#cccccc", "#884400",
+                "#000000", "#ffffff", "#ff0000", "#00ff00",
+                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
+                "#888888", "#444444", "#cccccc", "#884400",
+                "#000000", "#ffffff", "#ff0000", "#00ff00",
+                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
+                "#888888", "#444444", "#cccccc", "#884400",
+                "#000000", "#ffffff", "#ff0000", "#00ff00",
+                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
                 "#888888", "#444444", "#cccccc", "#884400"
-            ]
+            ];
             
             canvas.width = 600;
             canvas.height = 600;
@@ -98,7 +111,6 @@
                 for (let row = 0; row < GRID_SIZE; row++) {
                     for (let col = 0; col < GRID_SIZE; col++) {
                         ctx.fillStyle = grid[row][col];
-                        // multiply position and size by zoomLevel, offset by pan
                         ctx.fillRect(
                             col * CELL_SIZE * zoomLevel + panX,
                             row * CELL_SIZE * zoomLevel + panY,
@@ -117,54 +129,32 @@
             }
             
             function paintCell(pixelY, pixelX, color) {
-                // make sure we are within bounds before painting
                 if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
                 grid[pixelY][pixelX] = color;
-            
-                // mirror horizontally if x symmetry is on
-                if (isSymmetricalX) {
-                    grid[pixelY][GRID_SIZE - 1 - pixelX] = color;
-                }
-            
-                // mirror vertically if y symmetry is on
-                if (isSymmetricalY) {
-                    grid[GRID_SIZE - 1 - pixelY][pixelX] = color;
-                }
-            
-                // mirror the opposite corner if both are on
-                if (isSymmetricalX && isSymmetricalY) {
-                    grid[GRID_SIZE - 1 - pixelY][GRID_SIZE - 1 - pixelX] = color;
-                }
+                if (isSymmetricalX) grid[pixelY][GRID_SIZE - 1 - pixelX] = color;
+                if (isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][pixelX] = color;
+                if (isSymmetricalX && isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][GRID_SIZE - 1 - pixelX] = color;
             }
             
             function handleDrawing(event) {
                 if (!isDrawing) return;
-            
                 let x = event.offsetX;
                 let y = event.offsetY;
-            
-                // reverse the zoom and pan to get the actual grid cell
                 let pixelX = Math.floor((x - panX) / (CELL_SIZE * zoomLevel));
                 let pixelY = Math.floor((y - panY) / (CELL_SIZE * zoomLevel));
-            
-                // stop if the click is outside the grid
                 if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
-            
                 if (currentTool === "Fill") {
                     floodFill(pixelY, pixelX, grid[pixelY][pixelX]);
                 } else if (currentTool === "Eyedropper") {
+                    // eyedropper just updates currentColor, no need to sync hidden picker
                     currentColor = grid[pixelY][pixelX];
-                    colorPicker.value = currentColor;
                 } else {
-                    // eraser paints white, brush paints currentColor
                     paintCell(pixelY, pixelX, currentTool === "Eraser" ? "#ffffff" : currentColor);
                 }
-            
                 drawGrid();
             }
             
             canvas.addEventListener("mousedown", function(e) {
-                // if space is held, start panning instead of drawing
                 if (spaceHeld) {
                     isPanning = true;
                     lastMouseX = e.clientX;
@@ -172,14 +162,12 @@
                     canvas.style.cursor = "grabbing";
                     return;
                 }
-                // only save snapshot if we are actually changing the grid
                 if (currentTool !== "Eyedropper") saveSnapshot();
                 isDrawing = true;
                 handleDrawing(e);
             });
             
             canvas.addEventListener("mousemove", function(e) {
-                // handle panning if space is held and mouse is down
                 if (isPanning) {
                     let dx = e.clientX - lastMouseX;
                     let dy = e.clientY - lastMouseY;
@@ -198,12 +186,12 @@
             document.addEventListener("mouseup", function() {
                 isDrawing = false;
                 isPanning = false;
-                // restore cursor after panning
                 canvas.style.cursor = spaceHeld ? "grab" : "default";
             });
             
             drawGrid();
             
+            // when color picker value changes, update the selected swatch and current color
             colorPicker.addEventListener("input", function(e) {
                 currentColor = e.target.value;
                 swatches[selectedSwatch] = currentColor;
@@ -215,12 +203,8 @@
                 if (e.key === "f") setTool("Fill");
                 if (e.key === "b") setTool("Brush");
                 if (e.key === "i") setTool("Eyedropper");
-            
-                // symmetry toggles
                 if (e.shiftKey && e.key === "X") isSymmetricalX = !isSymmetricalX;
                 if (e.shiftKey && e.key === "Y") isSymmetricalY = !isSymmetricalY;
-            
-                // zoom in and out
                 if (e.key === "=") {
                     zoomLevel = Math.min(zoomLevel + 0.5, 8);
                     panX = Math.min(0, Math.max(panX, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.width)));
@@ -233,14 +217,11 @@
                     panY = Math.min(0, Math.max(panY, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.height)));
                     drawGrid();
                 }
-            
-                // space to pan
                 if (e.key === " ") {
                     e.preventDefault();
                     spaceHeld = true;
                     canvas.style.cursor = "grab";
                 }
-            
                 if (e.ctrlKey && e.key === "Backspace") {
                     saveSnapshot();
                     for (let i = 0; i < GRID_SIZE; i++) {
@@ -278,10 +259,54 @@
                     e.preventDefault();
                     redo();
                 }
+                if (e.ctrlKey && e.shiftKey && e.key === "P") {
+                    e.preventDefault();
+                    exportPalette();
+                }
+                if (e.ctrlKey && e.key === "p") {
+                    e.preventDefault();
+                    document.querySelector("#paletteImport").click();
+                }
+                // 2D palette navigation
+                if (e.key === "ArrowRight") {
+                    e.preventDefault();
+                    let row = selectedSwatch % 16;
+                    let col = Math.floor(selectedSwatch / 16);
+                    col = (col + 1) % 4;
+                    selectedSwatch = col * 16 + row;
+                    currentColor = swatches[selectedSwatch];
+                    buildPalette();
+                }
+                if (e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    let row = selectedSwatch % 16;
+                    let col = Math.floor(selectedSwatch / 16);
+                    col = (col + 3) % 4;
+                    selectedSwatch = col * 16 + row;
+                    currentColor = swatches[selectedSwatch];
+                    buildPalette();
+                }
+                if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    let row = selectedSwatch % 16;
+                    let col = Math.floor(selectedSwatch / 16);
+                    row = (row + 1) % 16;
+                    selectedSwatch = col * 16 + row;
+                    currentColor = swatches[selectedSwatch];
+                    buildPalette();
+                }
+                if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    let row = selectedSwatch % 16;
+                    let col = Math.floor(selectedSwatch / 16);
+                    row = (row + 15) % 16;
+                    selectedSwatch = col * 16 + row;
+                    currentColor = swatches[selectedSwatch];
+                    buildPalette();
+                }
             });
             
             document.addEventListener("keyup", function(e) {
-                // release pan mode when space is released
                 if (e.key === " ") {
                     spaceHeld = false;
                     isPanning = false;
@@ -303,7 +328,6 @@
             document.querySelector("#sizes").addEventListener("change", function(e) {
                 GRID_SIZE = parseInt(e.target.value);
                 CELL_SIZE = canvas.width / GRID_SIZE;
-                // reset zoom and pan when changing grid size
                 zoomLevel = 1;
                 panX = 0;
                 panY = 0;
@@ -335,7 +359,6 @@
                     GRID_SIZE = data.size;
                     CELL_SIZE = canvas.width / GRID_SIZE;
                     grid = data.grid;
-                    // reset zoom and pan when loading a file
                     zoomLevel = 1;
                     panX = 0;
                     panY = 0;
@@ -370,25 +393,55 @@
 
             function buildPalette() {
                 palette.innerHTML = "";
-                for(let i = 0; i < swatches.length; i++) {
+                for (let i = 0; i < swatches.length; i++) {
                     let color = swatches[i];
                     let newDiv = document.createElement("div");
                     newDiv.style.backgroundColor = color;
-                    newDiv.style.width = "30px";
-                    newDiv.style.height = "30px";
+                    newDiv.style.width = "31px";
+                    newDiv.style.height = "31px";
                     newDiv.style.borderRadius = "50%";
                     newDiv.style.border = i === selectedSwatch ? "2px solid white" : "2px solid transparent";
                     newDiv.style.flexShrink = "0";
+                    newDiv.style.cursor = "pointer";
+                    // single click selects the swatch
                     newDiv.addEventListener("click", function() {
                         selectedSwatch = i;
                         currentColor = swatches[i];
-                        colorPicker.value = currentColor;
-                        buildPalette(); // rebuild to update the highlight
+                        buildPalette();
+                    });
+                    // double click opens the native color picker for that swatch
+                    newDiv.addEventListener("dblclick", function() {
+                        selectedSwatch = i;
+                        colorPicker.value = swatches[i];
+                        colorPicker.click();
                     });
                     palette.appendChild(newDiv);
                 }
             }
             buildPalette();
+
+            function exportPalette() {
+                let text = swatches.map(color => color.replace("#", "")).join("\n");
+                let blob = new Blob([text], { type: "text/plain" });
+                let object = URL.createObjectURL(blob);
+                let link = document.createElement("a");
+                link.href = object;
+                link.download = "palette.hex";
+                link.click();
+            }
+            
+            document.querySelector("#paletteImport").addEventListener("change", function(e) {
+                let file = e.target.files[0];
+                let reader = new FileReader();
+                reader.onload = function(e) {
+                    let lines = e.target.result.split("\n");
+                    swatches = lines.filter(line => line.trim() !== "").map(line => "#" + line.trim());
+                    selectedSwatch = 0;
+                    currentColor = swatches[0];
+                    buildPalette();
+                };
+                reader.readAsText(file);
+            });
         </script>
     </body>
 </html>

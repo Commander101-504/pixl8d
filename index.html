@@ -2,11 +2,32 @@
 <html>
     <head>
         <title>Pixl8d</title>
+        <style>
+            body {
+                background-color: #aaaaaa;
+            }
+            #appContainer {
+                display: flex;
+                flex-direction: row;
+            }
+            #palette {
+                height: 600px;
+                width: 50px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: space-evenly;
+            }
+        </style>
     </head>
     <body>
-
-        <canvas id="canvas"></canvas>
+        <div id="appContainer">
+            <canvas id="canvas"></canvas>
+            <div id="palette"></div>
+        </div>
         <input type="color" id="colorPicker">
+        <input type="file" id="JSONImport" accept=".json" style="display:none;">
+        <input type="file" id="paletteImport" accept=".hex" style="display:none;">
 
         <label for="sizes">Choose a canvas size:</label>
         <select name="sizes" id="sizes">
@@ -20,19 +41,44 @@
         <script>
             const canvas = document.querySelector("#canvas");
             const ctx = canvas.getContext("2d");
+            canvas.style.border = "1px dashed black";
             const colorPicker = document.querySelector("#colorPicker");
-
+            const palette = document.querySelector("#palette");
+            
             let isDrawing = false;
             let currentColor = "#000000";
             let isGridOn = true;
-            let currentTool = "brush";
+            let currentTool = "Brush";
+            let isSymmetricalX = false;
+            let isSymmetricalY = false;
+            document.title = "Pixl8d - Brush";
+            
+            // zoom and pan variables
+            let zoomLevel = 1;
+            let panX = 0;
+            let panY = 0;
+            let isPanning = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            let spaceHeld = false;
+            
+            let undoStack = [];
+            let redoStack = [];
 
+            let selectedSwatch = 0;
+            let swatches = [
+                "#000000", "#ffffff", "#ff0000", "#00ff00",
+                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
+                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
+                "#888888", "#444444", "#cccccc", "#884400"
+            ]
+            
             canvas.width = 600;
             canvas.height = 600;
-
+            
             let GRID_SIZE = 16;
             let CELL_SIZE = canvas.width / GRID_SIZE;
-
+            
             let grid = [];
             
             function createGrid() {
@@ -48,14 +94,46 @@
             createGrid();
             
             function drawGrid() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
                 for (let row = 0; row < GRID_SIZE; row++) {
                     for (let col = 0; col < GRID_SIZE; col++) {
                         ctx.fillStyle = grid[row][col];
-                        ctx.fillRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-            
+                        // multiply position and size by zoomLevel, offset by pan
+                        ctx.fillRect(
+                            col * CELL_SIZE * zoomLevel + panX,
+                            row * CELL_SIZE * zoomLevel + panY,
+                            CELL_SIZE * zoomLevel + 0.5,
+                            CELL_SIZE * zoomLevel + 0.5
+                        );
                         ctx.strokeStyle = isGridOn ? "#cccccc" : "transparent";
-                        ctx.strokeRect(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        ctx.strokeRect(
+                            col * CELL_SIZE * zoomLevel + panX,
+                            row * CELL_SIZE * zoomLevel + panY,
+                            CELL_SIZE * zoomLevel,
+                            CELL_SIZE * zoomLevel
+                        );
                     }
+                }
+            }
+            
+            function paintCell(pixelY, pixelX, color) {
+                // make sure we are within bounds before painting
+                if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
+                grid[pixelY][pixelX] = color;
+            
+                // mirror horizontally if x symmetry is on
+                if (isSymmetricalX) {
+                    grid[pixelY][GRID_SIZE - 1 - pixelX] = color;
+                }
+            
+                // mirror vertically if y symmetry is on
+                if (isSymmetricalY) {
+                    grid[GRID_SIZE - 1 - pixelY][pixelX] = color;
+                }
+            
+                // mirror the opposite corner if both are on
+                if (isSymmetricalX && isSymmetricalY) {
+                    grid[GRID_SIZE - 1 - pixelY][GRID_SIZE - 1 - pixelX] = color;
                 }
             }
             
@@ -65,43 +143,106 @@
                 let x = event.offsetX;
                 let y = event.offsetY;
             
-                let pixelX = Math.floor((x / canvas.width) * GRID_SIZE);
-                let pixelY = Math.floor((y / canvas.height) * GRID_SIZE);
+                // reverse the zoom and pan to get the actual grid cell
+                let pixelX = Math.floor((x - panX) / (CELL_SIZE * zoomLevel));
+                let pixelY = Math.floor((y - panY) / (CELL_SIZE * zoomLevel));
             
-                if (currentTool === "fill") {
+                // stop if the click is outside the grid
+                if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
+            
+                if (currentTool === "Fill") {
                     floodFill(pixelY, pixelX, grid[pixelY][pixelX]);
-                } else if (currentTool === "eyedropper") {
-                    currentColor = grid[pixelY][pixelX]
-                    document.querySelector("#colorPicker").value = currentColor;
+                } else if (currentTool === "Eyedropper") {
+                    currentColor = grid[pixelY][pixelX];
+                    colorPicker.value = currentColor;
                 } else {
-                    grid[pixelY][pixelX] = currentTool === "eraser" ? "#ffffff" : currentColor;
+                    // eraser paints white, brush paints currentColor
+                    paintCell(pixelY, pixelX, currentTool === "Eraser" ? "#ffffff" : currentColor);
                 }
             
                 drawGrid();
             }
             
             canvas.addEventListener("mousedown", function(e) {
+                // if space is held, start panning instead of drawing
+                if (spaceHeld) {
+                    isPanning = true;
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                    canvas.style.cursor = "grabbing";
+                    return;
+                }
+                // only save snapshot if we are actually changing the grid
+                if (currentTool !== "Eyedropper") saveSnapshot();
                 isDrawing = true;
                 handleDrawing(e);
             });
             
-            canvas.addEventListener("mousemove", handleDrawing);
+            canvas.addEventListener("mousemove", function(e) {
+                // handle panning if space is held and mouse is down
+                if (isPanning) {
+                    let dx = e.clientX - lastMouseX;
+                    let dy = e.clientY - lastMouseY;
+                    panX += dx;
+                    panY += dy;
+                    panX = Math.min(0, Math.max(panX, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.width)));
+                    panY = Math.min(0, Math.max(panY, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.height)));
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                    drawGrid();
+                    return;
+                }
+                handleDrawing(e);
+            });
             
             document.addEventListener("mouseup", function() {
                 isDrawing = false;
+                isPanning = false;
+                // restore cursor after panning
+                canvas.style.cursor = spaceHeld ? "grab" : "default";
             });
+            
             drawGrid();
             
             colorPicker.addEventListener("input", function(e) {
                 currentColor = e.target.value;
+                swatches[selectedSwatch] = currentColor;
+                buildPalette();
             });
             
             document.addEventListener("keydown", function(e) {
-                if (e.key === "e") setTool("eraser");
-                if (e.key === "f") setTool("fill");
-                if (e.key === "b") setTool("brush");
-                if (e.key === "i") setTool("eyedropper");
+                if (e.key === "e") setTool("Eraser");
+                if (e.key === "f") setTool("Fill");
+                if (e.key === "b") setTool("Brush");
+                if (e.key === "i") setTool("Eyedropper");
+            
+                // symmetry toggles
+                if (e.shiftKey && e.key === "X") isSymmetricalX = !isSymmetricalX;
+                if (e.shiftKey && e.key === "Y") isSymmetricalY = !isSymmetricalY;
+            
+                // zoom in and out
+                if (e.key === "=") {
+                    zoomLevel = Math.min(zoomLevel + 0.5, 8);
+                    panX = Math.min(0, Math.max(panX, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.width)));
+                    panY = Math.min(0, Math.max(panY, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.height)));
+                    drawGrid();
+                }
+                if (e.key === "-") {
+                    zoomLevel = Math.max(zoomLevel - 0.5, 1);
+                    panX = Math.min(0, Math.max(panX, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.width)));
+                    panY = Math.min(0, Math.max(panY, -(GRID_SIZE * CELL_SIZE * zoomLevel - canvas.height)));
+                    drawGrid();
+                }
+            
+                // space to pan
+                if (e.key === " ") {
+                    e.preventDefault();
+                    spaceHeld = true;
+                    canvas.style.cursor = "grab";
+                }
+            
                 if (e.ctrlKey && e.key === "Backspace") {
+                    saveSnapshot();
                     for (let i = 0; i < GRID_SIZE; i++) {
                         for (let k = 0; k < GRID_SIZE; k++) {
                             grid[i][k] = "#ffffff";
@@ -109,17 +250,42 @@
                     }
                     drawGrid();
                 }
-                if (e.ctrlKey && e.key === "s") {
+                if (e.ctrlKey && e.shiftKey && e.key === "S") {
                     e.preventDefault();
                     let newLink = document.createElement("a");
                     newLink.href = canvas.toDataURL();
                     newLink.download = "pixel-art.png";
                     newLink.click();
                 }
+                if (e.ctrlKey && e.key === "s") {
+                    e.preventDefault();
+                    exportJSON();
+                }
+                if (e.ctrlKey && e.shiftKey && e.key === "O") {
+                    e.preventDefault();
+                    document.querySelector("#JSONImport").click();
+                }
                 if (e.ctrlKey && e.key === "h") {
                     e.preventDefault();
                     isGridOn = !isGridOn;
                     drawGrid();
+                }
+                if (e.ctrlKey && e.key === "z") {
+                    e.preventDefault();
+                    undo();
+                }
+                if (e.ctrlKey && e.key === "y") {
+                    e.preventDefault();
+                    redo();
+                }
+            });
+            
+            document.addEventListener("keyup", function(e) {
+                // release pan mode when space is released
+                if (e.key === " ") {
+                    spaceHeld = false;
+                    isPanning = false;
+                    canvas.style.cursor = "default";
                 }
             });
             
@@ -135,18 +301,94 @@
             }
             
             document.querySelector("#sizes").addEventListener("change", function(e) {
-            
                 GRID_SIZE = parseInt(e.target.value);
                 CELL_SIZE = canvas.width / GRID_SIZE;
-            
+                // reset zoom and pan when changing grid size
+                zoomLevel = 1;
+                panX = 0;
+                panY = 0;
                 createGrid();
                 drawGrid();
-            
             });
-
+            
             function setTool(tool) {
                 currentTool = tool;
+                document.title = "Pixl8d - " + tool;
             }
+            
+            function exportJSON() {
+                let data = { size: GRID_SIZE, grid: grid };
+                let json = JSON.stringify(data);
+                let blob = new Blob([json], { type: "application/json" });
+                let object = URL.createObjectURL(blob);
+                let link = document.createElement("a");
+                link.href = object;
+                link.download = "pixel-art.json";
+                link.click();
+            }
+            
+            document.querySelector("#JSONImport").addEventListener("change", function(e) {
+                let file = e.target.files[0];
+                let reader = new FileReader();
+                reader.onload = function(e) {
+                    let data = JSON.parse(e.target.result);
+                    GRID_SIZE = data.size;
+                    CELL_SIZE = canvas.width / GRID_SIZE;
+                    grid = data.grid;
+                    // reset zoom and pan when loading a file
+                    zoomLevel = 1;
+                    panX = 0;
+                    panY = 0;
+                    document.querySelector("#sizes").value = GRID_SIZE;
+                    drawGrid();
+                };
+                reader.readAsText(file);
+            });
+            
+            function saveSnapshot() {
+                undoStack.push(JSON.parse(JSON.stringify(grid)));
+                redoStack = [];
+            }
+            
+            function undo() {
+                if (undoStack.length === 0) return;
+                redoStack.push(JSON.parse(JSON.stringify(grid)));
+                grid = undoStack.pop();
+                drawGrid();
+            }
+            
+            function redo() {
+                if (redoStack.length === 0) return;
+                undoStack.push(JSON.parse(JSON.stringify(grid)));
+                grid = redoStack.pop();
+                drawGrid();
+            }
+            
+            window.addEventListener("beforeunload", function(e) {
+                e.preventDefault();
+            });
+
+            function buildPalette() {
+                palette.innerHTML = "";
+                for(let i = 0; i < swatches.length; i++) {
+                    let color = swatches[i];
+                    let newDiv = document.createElement("div");
+                    newDiv.style.backgroundColor = color;
+                    newDiv.style.width = "30px";
+                    newDiv.style.height = "30px";
+                    newDiv.style.borderRadius = "50%";
+                    newDiv.style.border = i === selectedSwatch ? "2px solid white" : "2px solid transparent";
+                    newDiv.style.flexShrink = "0";
+                    newDiv.addEventListener("click", function() {
+                        selectedSwatch = i;
+                        currentColor = swatches[i];
+                        colorPicker.value = currentColor;
+                        buildPalette(); // rebuild to update the highlight
+                    });
+                    palette.appendChild(newDiv);
+                }
+            }
+            buildPalette();
         </script>
     </body>
 </html>

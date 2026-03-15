@@ -57,7 +57,8 @@
             canvas.style.border = "1px dashed black";
             const colorPicker = document.querySelector("#colorPicker");
             const palette = document.querySelector("#palette");
-            
+
+            let isDirty = false;
             let isDrawing = false;
             let isErasing = false; // NEW — tracks right click drag erasing
             let currentColor = "#000000";
@@ -66,6 +67,7 @@
             let isSymmetricalX = false;
             let isSymmetricalY = false;
             document.title = "Pixl8d - Brush";
+            let brushSize = 1;
             
             let zoomLevel = 1;
             let panX = 0;
@@ -141,11 +143,23 @@
             }
             
             function paintCell(pixelY, pixelX, color) {
-                if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
-                grid[pixelY][pixelX] = color;
-                if (isSymmetricalX) grid[pixelY][GRID_SIZE - 1 - pixelX] = color;
-                if (isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][pixelX] = color;
-                if (isSymmetricalX && isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][GRID_SIZE - 1 - pixelX] = color;
+                // loop through a square of cells based on brush size
+                for (let i = 0; i < brushSize; i++) {
+                    for (let k = 0; k < brushSize; k++) {
+                        // offset so the brush is centered on the click
+                        let row = pixelY - Math.floor(brushSize / 2) + i;
+                        let col = pixelX - Math.floor(brushSize / 2) + k;
+            
+                        // skip cells outside the grid
+                        if (col < 0 || col >= GRID_SIZE || row < 0 || row >= GRID_SIZE) continue;
+            
+                        grid[row][col] = color;
+            
+                        if (isSymmetricalX) grid[row][GRID_SIZE - 1 - col] = color;
+                        if (isSymmetricalY) grid[GRID_SIZE - 1 - row][col] = color;
+                        if (isSymmetricalX && isSymmetricalY) grid[GRID_SIZE - 1 - row][GRID_SIZE - 1 - col] = color;
+                    }
+                }
             }
 
             // helper to convert mouse event coordinates to grid cell
@@ -341,6 +355,12 @@
                     currentColor = swatches[selectedSwatch];
                     buildPalette();
                 }
+                if (e.key === "[") {
+                    brushSize = subtractBrushSize();
+                }
+                if (e.key === "]") {
+                    brushSize = addBrushSize();
+                }
             });
             
             document.addEventListener("keyup", function(e) {
@@ -408,6 +428,7 @@
             });
             
             function saveSnapshot() {
+                isDirty = true;
                 undoStack.push(JSON.parse(JSON.stringify(grid)));
                 redoStack = [];
             }
@@ -427,6 +448,7 @@
             }
             
             window.addEventListener("beforeunload", function(e) {
+                if(!isDirty) return;
                 e.preventDefault();
             });
 
@@ -479,6 +501,20 @@
                 };
                 reader.readAsText(file);
             });
+
+            function addBrushSize() {
+                if (brushSize == 1) return 2;
+                if (brushSize == 2) return 4;
+                if (brushSize == 4) return 8;
+                if (brushSize == 8) return 8;
+            }
+
+            function subtractBrushSize() {
+                if (brushSize == 1) return 1;
+                if (brushSize == 2) return 1;
+                if (brushSize == 4) return 2;
+                if (brushSize == 8) return 4;
+            }
         </script>
     </body>
 </html>

@@ -5,6 +5,15 @@
         <style>
             body {
                 background-color: #aaaaaa;
+                width: 100vw;
+                height: 100vh;
+                position: absolute;
+                top: 0;
+                left: 0;
+                overflow: hidden;
+                display: flex;
+                justify-content: center;
+                align-items: center;
             }
             #appContainer {
                 display: flex;
@@ -19,26 +28,28 @@
                 align-content: space-evenly;
                 gap: 2px;
             }
+            #sideOptions {
+                width: 75px;
+            }
         </style>
     </head>
     <body>
         <div id="appContainer">
+            <div id="sideOptions">
+                <select name="sizes" id="sizes" style="aspect-ratio:1/1; width:75px;">
+                    <option value="4">4x4</option>
+                    <option value="8">8x8</option>
+                    <option value="16" selected>16x16</option>
+                    <option value="32">32x32</option>
+                    <option value="64">64x64</option>
+                </select>
+            </div>
             <canvas id="canvas"></canvas>
             <div id="palette"></div>
         </div>
-        <!-- color picker is hidden, only used as a programmatic trigger -->
         <input type="color" id="colorPicker" style="display:none;">
         <input type="file" id="JSONImport" accept=".json" style="display:none;">
         <input type="file" id="paletteImport" accept=".hex" style="display:none;">
-
-        <label for="sizes">Choose a canvas size:</label>
-        <select name="sizes" id="sizes">
-            <option value="4">4x4</option>
-            <option value="8">8x8</option>
-            <option value="16" selected>16x16</option>
-            <option value="32">32x32</option>
-            <option value="64">64x64</option>
-        </select>
 
         <script>
             const canvas = document.querySelector("#canvas");
@@ -48,6 +59,7 @@
             const palette = document.querySelector("#palette");
             
             let isDrawing = false;
+            let isErasing = false; // NEW — tracks right click drag erasing
             let currentColor = "#000000";
             let isGridOn = true;
             let currentTool = "Brush";
@@ -68,22 +80,22 @@
 
             let selectedSwatch = 0;
             let swatches = [
-                "#000000", "#ffffff", "#ff0000", "#00ff00",
-                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
-                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
-                "#888888", "#444444", "#cccccc", "#884400",
-                "#000000", "#ffffff", "#ff0000", "#00ff00",
-                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
-                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
-                "#888888", "#444444", "#cccccc", "#884400",
-                "#000000", "#ffffff", "#ff0000", "#00ff00",
-                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
-                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
-                "#888888", "#444444", "#cccccc", "#884400",
-                "#000000", "#ffffff", "#ff0000", "#00ff00",
-                "#0000ff", "#ffff00", "#ff00ff", "#00ffff",
-                "#ff8800", "#8800ff", "#00ff88", "#ff0088",
-                "#888888", "#444444", "#cccccc", "#884400"
+                "#060608", "#141013", "#3b1725", "#73172d",
+                "#b4202a", "#df3e23", "#fa6a0a", "#f9a31b",
+                "#ffd541", "#fffc40", "#d6f264", "#9cdb43",
+                "#59c135", "#14a02e", "#1a7a3e", "#24523b",
+                "#122020", "#143464", "#285cc4", "#249fde",
+                "#20d6c7", "#a6fcdb", "#ffffff", "#fef3c0",
+                "#fad6b8", "#f5a097", "#e86a73", "#bc4a9b",
+                "#793a80", "#403353", "#242234", "#221c1a",
+                "#322b28", "#71413b", "#bb7547", "#dba463",
+                "#f4d29c", "#dae0ea", "#b3b9d1", "#8b93af",
+                "#6d758d", "#4a5462", "#333941", "#422433",
+                "#5b3138", "#8e5252", "#ba756a", "#e9b5a3",
+                "#e3e6ff", "#b9bffb", "#849be4", "#588dbe",
+                "#477d85", "#23674e", "#328464", "#5daf8d",
+                "#92dcba", "#cdf7e2", "#e4d2aa", "#c7b08b",
+                "#a08662", "#796755", "#5a4e44", "#423934"
             ];
             
             canvas.width = 600;
@@ -135,18 +147,24 @@
                 if (isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][pixelX] = color;
                 if (isSymmetricalX && isSymmetricalY) grid[GRID_SIZE - 1 - pixelY][GRID_SIZE - 1 - pixelX] = color;
             }
+
+            // helper to convert mouse event coordinates to grid cell
+            function eventToCell(e) {
+                let x = e.offsetX;
+                let y = e.offsetY;
+                return {
+                    pixelX: Math.floor((x - panX) / (CELL_SIZE * zoomLevel)),
+                    pixelY: Math.floor((y - panY) / (CELL_SIZE * zoomLevel))
+                };
+            }
             
             function handleDrawing(event) {
                 if (!isDrawing) return;
-                let x = event.offsetX;
-                let y = event.offsetY;
-                let pixelX = Math.floor((x - panX) / (CELL_SIZE * zoomLevel));
-                let pixelY = Math.floor((y - panY) / (CELL_SIZE * zoomLevel));
+                let { pixelX, pixelY } = eventToCell(event);
                 if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
                 if (currentTool === "Fill") {
                     floodFill(pixelY, pixelX, grid[pixelY][pixelX]);
                 } else if (currentTool === "Eyedropper") {
-                    // eyedropper just updates currentColor, no need to sync hidden picker
                     currentColor = grid[pixelY][pixelX];
                 } else {
                     paintCell(pixelY, pixelX, currentTool === "Eraser" ? "#ffffff" : currentColor);
@@ -166,6 +184,17 @@
                 isDrawing = true;
                 handleDrawing(e);
             });
+
+            // right click — save snapshot once, set isErasing, paint first cell
+            canvas.addEventListener("contextmenu", function(e) {
+                e.preventDefault();
+                saveSnapshot();
+                isErasing = true;
+                let { pixelX, pixelY } = eventToCell(e);
+                if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
+                paintCell(pixelY, pixelX, "#ffffff");
+                drawGrid();
+            });
             
             canvas.addEventListener("mousemove", function(e) {
                 if (isPanning) {
@@ -180,18 +209,27 @@
                     drawGrid();
                     return;
                 }
+                // handle right click drag erasing
+                if (isErasing) {
+                    let { pixelX, pixelY } = eventToCell(e);
+                    if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
+                    paintCell(pixelY, pixelX, "#ffffff");
+                    drawGrid();
+                    return;
+                }
                 handleDrawing(e);
             });
             
+            // mouseup now also stops right click erasing
             document.addEventListener("mouseup", function() {
                 isDrawing = false;
+                isErasing = false;
                 isPanning = false;
                 canvas.style.cursor = spaceHeld ? "grab" : "default";
             });
             
             drawGrid();
             
-            // when color picker value changes, update the selected swatch and current color
             colorPicker.addEventListener("input", function(e) {
                 currentColor = e.target.value;
                 swatches[selectedSwatch] = currentColor;
@@ -267,7 +305,6 @@
                     e.preventDefault();
                     document.querySelector("#paletteImport").click();
                 }
-                // 2D palette navigation
                 if (e.key === "ArrowRight") {
                     e.preventDefault();
                     let row = selectedSwatch % 16;
@@ -341,7 +378,7 @@
             }
             
             function exportJSON() {
-                let data = { size: GRID_SIZE, grid: grid };
+                let data = { size: GRID_SIZE, grid: grid, palette: swatches };
                 let json = JSON.stringify(data);
                 let blob = new Blob([json], { type: "application/json" });
                 let object = URL.createObjectURL(blob);
@@ -358,12 +395,14 @@
                     let data = JSON.parse(e.target.result);
                     GRID_SIZE = data.size;
                     CELL_SIZE = canvas.width / GRID_SIZE;
+                    swatches = data.palette;
                     grid = data.grid;
                     zoomLevel = 1;
                     panX = 0;
                     panY = 0;
                     document.querySelector("#sizes").value = GRID_SIZE;
                     drawGrid();
+                    buildPalette();
                 };
                 reader.readAsText(file);
             });
@@ -403,13 +442,11 @@
                     newDiv.style.border = i === selectedSwatch ? "2px solid white" : "2px solid transparent";
                     newDiv.style.flexShrink = "0";
                     newDiv.style.cursor = "pointer";
-                    // single click selects the swatch
                     newDiv.addEventListener("click", function() {
                         selectedSwatch = i;
                         currentColor = swatches[i];
                         buildPalette();
                     });
-                    // double click opens the native color picker for that swatch
                     newDiv.addEventListener("dblclick", function() {
                         selectedSwatch = i;
                         colorPicker.value = swatches[i];

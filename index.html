@@ -3,8 +3,21 @@
     <head>
         <title>Pixl8d</title>
         <style>
+            :root {
+                --bg: #1a1a1a;
+                --surface: #2a2a2a;
+                --border: #444;
+                --text: #ffffff;
+            }
+            
+            :root.light {
+                --bg: #f0f0f0;
+                --surface: #ffffff;
+                --border: #999;
+                --text: #000000;
+            }
             body {
-                background-color: #aaaaaa;
+                background-color: var(--bg);
                 width: 100vw;
                 height: 100vh;
                 position: absolute;
@@ -18,6 +31,7 @@
             #appContainer {
                 display: flex;
                 flex-direction: row;
+                position: relative;
             }
             #palette {
                 height: 600px;
@@ -30,19 +44,76 @@
             }
             #sideOptions {
                 width: 75px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            #sizeButton, #brushButton {
+                width: 75px;
+                height: 75px;
+                background-color: white;
+                color: black;
+                border: 1px solid var(--border);
+                font-size: 0.75rem;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                user-select: none;
+                box-sizing: border-box;
+            }
+            #sizeButton:hover, #brushButton:hover {
+                background-color: #eee;
+            }
+            #sizePopover, #brushPopover {
+                position: absolute;
+                display: none;
+                flex-direction: row;
+                background-color: var(--surface);
+                border: 1px solid var(--border);
+                z-index: 9999;
+            }
+            .sizeOption, .brushOption {
+                width: 73px;
+                height: 73px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--text);
+                font-size: 0.75rem;
+                cursor: pointer;
+                text-align: center;
+                user-select: none;
+                box-sizing: border-box;
+            }
+            .sizeOption:hover, .brushOption:hover {
+                background-color: var(--surface);
+            }
+            .sizeOption.selected, .brushOption.selected {
+                background-color: var(--surface);
+                font-weight: bold;
             }
         </style>
     </head>
     <body>
         <div id="appContainer">
             <div id="sideOptions">
-                <select name="sizes" id="sizes" style="aspect-ratio:1/1; width:75px;">
-                    <option value="4">4x4</option>
-                    <option value="8">8x8</option>
-                    <option value="16" selected>16x16</option>
-                    <option value="32">32x32</option>
-                    <option value="64">64x64</option>
-                </select>
+                <div id="sizeButton">16x16</div>
+                <div id="brushButton">1px</div>
+            </div>
+            <div id="sizePopover">
+                <div class="sizeOption" data-size="4">4x4</div>
+                <div class="sizeOption" data-size="8">8x8</div>
+                <div class="sizeOption selected" data-size="16">16x16</div>
+                <div class="sizeOption" data-size="32">32x32</div>
+                <div class="sizeOption" data-size="64">64x64</div>
+            </div>
+            <div id="brushPopover">
+                <div class="brushOption selected" data-brush="1">1px</div>
+                <div class="brushOption" data-brush="2">2px</div>
+                <div class="brushOption" data-brush="4">4px</div>
+                <div class="brushOption" data-brush="8">8px</div>
             </div>
             <canvas id="canvas"></canvas>
             <div id="palette"></div>
@@ -57,10 +128,17 @@
             canvas.style.border = "1px dashed black";
             const colorPicker = document.querySelector("#colorPicker");
             const palette = document.querySelector("#palette");
+            const sizeButton = document.querySelector("#sizeButton");
+            const sizePopover = document.querySelector("#sizePopover");
+            const sizeOptions = document.querySelectorAll(".sizeOption");
+            const brushButton = document.querySelector("#brushButton");
+            const brushPopover = document.querySelector("#brushPopover");
+            const brushOptions = document.querySelectorAll(".brushOption");
+            const sizes = [4, 8, 16, 32, 64];
+            const brushSizes = [1, 2, 4, 8];
 
-            let isDirty = false;
             let isDrawing = false;
-            let isErasing = false; // NEW — tracks right click drag erasing
+            let isErasing = false;
             let currentColor = "#000000";
             let isGridOn = true;
             let currentTool = "Brush";
@@ -105,6 +183,82 @@
             
             let GRID_SIZE = 16;
             let CELL_SIZE = canvas.width / GRID_SIZE;
+
+            function updateSizeButton() {
+                sizeButton.textContent = GRID_SIZE + "x" + GRID_SIZE;
+                const selectedIndex = sizes.indexOf(GRID_SIZE);
+                const buttonRect = sizeButton.getBoundingClientRect();
+                const appRect = document.querySelector("#appContainer").getBoundingClientRect();
+                sizePopover.style.top = (buttonRect.top - appRect.top) + "px";
+                sizePopover.style.left = (buttonRect.left - appRect.left - selectedIndex * 75) + "px";
+                sizeOptions.forEach((opt, i) => {
+                    opt.classList.toggle("selected", i === selectedIndex);
+                });
+            }
+
+            // updates brush button label and repositions popover
+            function updateBrushButton() {
+                brushButton.textContent = brushSize + "px";
+                const selectedIndex = brushSizes.indexOf(brushSize);
+                const buttonRect = brushButton.getBoundingClientRect();
+                const appRect = document.querySelector("#appContainer").getBoundingClientRect();
+                brushPopover.style.top = (buttonRect.top - appRect.top) + "px";
+                brushPopover.style.left = (buttonRect.left - appRect.left - selectedIndex * 75) + "px";
+                brushOptions.forEach((opt, i) => {
+                    opt.classList.toggle("selected", i === selectedIndex);
+                });
+            }
+
+            sizeButton.addEventListener("click", function(e) {
+                e.stopPropagation();
+                brushPopover.style.display = "none";
+                const isVisible = sizePopover.style.display === "flex";
+                if (isVisible) {
+                    sizePopover.style.display = "none";
+                } else {
+                    updateSizeButton();
+                    sizePopover.style.display = "flex";
+                }
+            });
+
+            brushButton.addEventListener("click", function(e) {
+                e.stopPropagation();
+                sizePopover.style.display = "none";
+                const isVisible = brushPopover.style.display === "flex";
+                if (isVisible) {
+                    brushPopover.style.display = "none";
+                } else {
+                    updateBrushButton();
+                    brushPopover.style.display = "flex";
+                }
+            });
+
+            sizeOptions.forEach(function(opt) {
+                opt.addEventListener("click", function() {
+                    GRID_SIZE = parseInt(opt.getAttribute("data-size"));
+                    CELL_SIZE = canvas.width / GRID_SIZE;
+                    zoomLevel = 1;
+                    panX = 0;
+                    panY = 0;
+                    createGrid();
+                    drawGrid();
+                    updateSizeButton();
+                    sizePopover.style.display = "none";
+                });
+            });
+
+            brushOptions.forEach(function(opt) {
+                opt.addEventListener("click", function() {
+                    brushSize = parseInt(opt.getAttribute("data-brush"));
+                    updateBrushButton();
+                    brushPopover.style.display = "none";
+                });
+            });
+
+            document.addEventListener("click", function() {
+                sizePopover.style.display = "none";
+                brushPopover.style.display = "none";
+            });
             
             let grid = [];
             
@@ -143,18 +297,12 @@
             }
             
             function paintCell(pixelY, pixelX, color) {
-                // loop through a square of cells based on brush size
                 for (let i = 0; i < brushSize; i++) {
                     for (let k = 0; k < brushSize; k++) {
-                        // offset so the brush is centered on the click
                         let row = pixelY - Math.floor(brushSize / 2) + i;
                         let col = pixelX - Math.floor(brushSize / 2) + k;
-            
-                        // skip cells outside the grid
                         if (col < 0 || col >= GRID_SIZE || row < 0 || row >= GRID_SIZE) continue;
-            
                         grid[row][col] = color;
-            
                         if (isSymmetricalX) grid[row][GRID_SIZE - 1 - col] = color;
                         if (isSymmetricalY) grid[GRID_SIZE - 1 - row][col] = color;
                         if (isSymmetricalX && isSymmetricalY) grid[GRID_SIZE - 1 - row][GRID_SIZE - 1 - col] = color;
@@ -162,7 +310,6 @@
                 }
             }
 
-            // helper to convert mouse event coordinates to grid cell
             function eventToCell(e) {
                 let x = e.offsetX;
                 let y = e.offsetY;
@@ -199,7 +346,6 @@
                 handleDrawing(e);
             });
 
-            // right click — save snapshot once, set isErasing, paint first cell
             canvas.addEventListener("contextmenu", function(e) {
                 e.preventDefault();
                 saveSnapshot();
@@ -223,7 +369,6 @@
                     drawGrid();
                     return;
                 }
-                // handle right click drag erasing
                 if (isErasing) {
                     let { pixelX, pixelY } = eventToCell(e);
                     if (pixelX < 0 || pixelX >= GRID_SIZE || pixelY < 0 || pixelY >= GRID_SIZE) return;
@@ -234,7 +379,6 @@
                 handleDrawing(e);
             });
             
-            // mouseup now also stops right click erasing
             document.addEventListener("mouseup", function() {
                 isDrawing = false;
                 isErasing = false;
@@ -357,9 +501,14 @@
                 }
                 if (e.key === "[") {
                     brushSize = subtractBrushSize();
+                    updateBrushButton();
                 }
                 if (e.key === "]") {
                     brushSize = addBrushSize();
+                    updateBrushButton();
+                }
+                if (e.key === "m") {
+                    document.documentElement.classList.toggle("light");
                 }
             });
             
@@ -381,16 +530,6 @@
                 floodFill(row, col - 1, targetColor);
                 floodFill(row, col + 1, targetColor);
             }
-            
-            document.querySelector("#sizes").addEventListener("change", function(e) {
-                GRID_SIZE = parseInt(e.target.value);
-                CELL_SIZE = canvas.width / GRID_SIZE;
-                zoomLevel = 1;
-                panX = 0;
-                panY = 0;
-                createGrid();
-                drawGrid();
-            });
             
             function setTool(tool) {
                 currentTool = tool;
@@ -420,7 +559,7 @@
                     zoomLevel = 1;
                     panX = 0;
                     panY = 0;
-                    document.querySelector("#sizes").value = GRID_SIZE;
+                    updateSizeButton();
                     drawGrid();
                     buildPalette();
                 };
@@ -428,7 +567,6 @@
             });
             
             function saveSnapshot() {
-                isDirty = true;
                 undoStack.push(JSON.parse(JSON.stringify(grid)));
                 redoStack = [];
             }
@@ -448,7 +586,6 @@
             }
             
             window.addEventListener("beforeunload", function(e) {
-                if(!isDirty) return;
                 e.preventDefault();
             });
 
